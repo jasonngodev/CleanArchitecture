@@ -1,33 +1,28 @@
 ﻿using CleanArchitecture.Application.Common.Interfaces;
 using CleanArchitecture.Application.Common.Security;
 using MediatR;
-using System.Threading;
-using System.Threading.Tasks;
 
-namespace CleanArchitecture.Application.TodoLists.Commands.PurgeTodoLists
+namespace CleanArchitecture.Application.TodoLists.Commands.PurgeTodoLists;
+
+[Authorize(Roles = "Administrator")]
+[Authorize(Policy = "CanPurge")]
+public record PurgeTodoListsCommand : IRequest;
+
+public class PurgeTodoListsCommandHandler : IRequestHandler<PurgeTodoListsCommand>
 {
-    [Authorize(Roles = "Administrator")]
-    [Authorize(Policy = "CanPurge")]
-    public class PurgeTodoListsCommand : IRequest
+    private readonly IApplicationDbContext _context;
+
+    public PurgeTodoListsCommandHandler(IApplicationDbContext context)
     {
+        _context = context;
     }
 
-    public class PurgeTodoListsCommandHandler : IRequestHandler<PurgeTodoListsCommand>
+    public async Task<Unit> Handle(PurgeTodoListsCommand request, CancellationToken cancellationToken)
     {
-        private readonly IApplicationDbContext _context;
+        _context.TodoLists.RemoveRange(_context.TodoLists);
 
-        public PurgeTodoListsCommandHandler(IApplicationDbContext context)
-        {
-            _context = context;
-        }
+        await _context.SaveChangesAsync(cancellationToken);
 
-        public async Task<Unit> Handle(PurgeTodoListsCommand request, CancellationToken cancellationToken)
-        {
-            _context.TodoLists.RemoveRange(_context.TodoLists);
-
-            await _context.SaveChangesAsync(cancellationToken);
-
-            return Unit.Value;
-        }
+        return Unit.Value;
     }
 }

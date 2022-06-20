@@ -2,77 +2,76 @@
 using CleanArchitecture.Application.Common.Security;
 using CleanArchitecture.Application.TodoLists.Commands.CreateTodoList;
 using CleanArchitecture.Application.TodoLists.Commands.PurgeTodoLists;
-using CleanArchitecture.Application.TodoLists.Queries.ExportTodos;
 using CleanArchitecture.Domain.Entities;
 using FluentAssertions;
 using NUnit.Framework;
-using System;
-using System.Threading.Tasks;
 
-namespace CleanArchitecture.Application.IntegrationTests.TodoLists.Commands
+namespace CleanArchitecture.Application.IntegrationTests.TodoLists.Commands;
+
+using static Testing;
+
+public class PurgeTodoListsTests : BaseTestFixture
 {
-    using static Testing;
-
-    public class PurgeTodoListsTests : TestBase
+    [Test]
+    public async Task ShouldDenyAnonymousUser()
     {
-        [Test]
-        public void ShouldDenyAnonymousUser()
+        var command = new PurgeTodoListsCommand();
+
+        command.GetType().Should().BeDecoratedWith<AuthorizeAttribute>();
+
+        var action = () => SendAsync(command);
+
+        await action.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Test]
+    public async Task ShouldDenyNonAdministrator()
+    {
+        await RunAsDefaultUserAsync();
+
+        var command = new PurgeTodoListsCommand();
+
+        var action = () => SendAsync(command);
+
+        await action.Should().ThrowAsync<ForbiddenAccessException>();
+    }
+
+    [Test]
+    public async Task ShouldAllowAdministrator()
+    {
+        await RunAsAdministratorAsync();
+
+        var command = new PurgeTodoListsCommand();
+
+        var action = () => SendAsync(command);
+
+        await action.Should().NotThrowAsync<ForbiddenAccessException>();
+    }
+
+    [Test]
+    public async Task ShouldDeleteAllLists()
+    {
+        await RunAsAdministratorAsync();
+
+        await SendAsync(new CreateTodoListCommand
         {
-            var command = new PurgeTodoListsCommand();
+            Title = "New List #1"
+        });
 
-            command.GetType().Should().BeDecoratedWith<AuthorizeAttribute>();
-
-            FluentActions.Invoking(() =>
-                SendAsync(command)).Should().Throw<UnauthorizedAccessException>();
-        }
-
-        [Test]
-        public async Task ShouldDenyNonAdministrator()
+        await SendAsync(new CreateTodoListCommand
         {
-            await RunAsDefaultUserAsync();
+            Title = "New List #2"
+        });
 
-            var command = new PurgeTodoListsCommand();
-
-            FluentActions.Invoking(() =>
-                SendAsync(command)).Should().Throw<ForbiddenAccessException>();
-        }
-
-        [Test]
-        public async Task ShouldAllowAdministrator()
+        await SendAsync(new CreateTodoListCommand
         {
-            await RunAsAdministratorAsync();
+            Title = "New List #3"
+        });
 
-            var command = new PurgeTodoListsCommand();
+        await SendAsync(new PurgeTodoListsCommand());
 
-            FluentActions.Invoking(() => SendAsync(command))
-                .Should().NotThrow<ForbiddenAccessException>();
-        }
+        var count = await CountAsync<TodoList>();
 
-        [Test]
-        public async Task ShouldDeleteAllLists()
-        {
-            await RunAsAdministratorAsync();
-
-            await SendAsync(new CreateTodoListCommand
-            {
-                Title = "New List #1"
-            });
-
-            await SendAsync(new CreateTodoListCommand
-            {
-                Title = "New List #2"
-            });
-
-            await SendAsync(new CreateTodoListCommand
-            {
-                Title = "New List #3"
-            });
-
-            await SendAsync(new PurgeTodoListsCommand());
-
-            var count = await CountAsync<TodoList>();
-
-            count.Should().Be(0);
-        }
+        count.Should().Be(0);
     }
 }

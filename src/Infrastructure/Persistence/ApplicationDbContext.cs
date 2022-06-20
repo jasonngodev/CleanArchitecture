@@ -1,86 +1,52 @@
-﻿using CleanArchitecture.Application.Common.Interfaces;
-using CleanArchitecture.Domain.Common;
+﻿using System.Reflection;
+using CleanArchitecture.Application.Common.Interfaces;
 using CleanArchitecture.Domain.Entities;
 using CleanArchitecture.Infrastructure.Identity;
-using IdentityServer4.EntityFramework.Options;
+using CleanArchitecture.Infrastructure.Persistence.Interceptors;
+using Duende.IdentityServer.EntityFramework.Options;
+using MediatR;
 using Microsoft.AspNetCore.ApiAuthorization.IdentityServer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Linq;
-using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
 
-namespace CleanArchitecture.Infrastructure.Persistence
+namespace CleanArchitecture.Infrastructure.Persistence;
+
+public class ApplicationDbContext : ApiAuthorizationDbContext<ApplicationUser>, IApplicationDbContext
 {
-    public class ApplicationDbContext : ApiAuthorizationDbContext<ApplicationUser>, IApplicationDbContext
+    private readonly IMediator _mediator;
+    private readonly AuditableEntitySaveChangesInterceptor _auditableEntitySaveChangesInterceptor;
+
+    public ApplicationDbContext(
+        DbContextOptions<ApplicationDbContext> options,
+        IOptions<OperationalStoreOptions> operationalStoreOptions,
+        IMediator mediator,
+        AuditableEntitySaveChangesInterceptor auditableEntitySaveChangesInterceptor) 
+        : base(options, operationalStoreOptions)
     {
-        private readonly ICurrentUserService _currentUserService;
-        private readonly IDateTime _dateTime;
-        private readonly IDomainEventService _domainEventService;
+        _mediator = mediator;
+        _auditableEntitySaveChangesInterceptor = auditableEntitySaveChangesInterceptor;
+    }
 
-        public ApplicationDbContext(
-            DbContextOptions options,
-            IOptions<OperationalStoreOptions> operationalStoreOptions,
-            ICurrentUserService currentUserService,
-            IDomainEventService domainEventService,
-            IDateTime dateTime) : base(options, operationalStoreOptions)
-        {
-            _currentUserService = currentUserService;
-            _domainEventService = domainEventService;
-            _dateTime = dateTime;
-        }
+    public DbSet<TodoList> TodoLists => Set<TodoList>();
 
-        public DbSet<TodoItem> TodoItems { get; set; }
+    public DbSet<TodoItem> TodoItems => Set<TodoItem>();
 
-        public DbSet<TodoList> TodoLists { get; set; }
+    protected override void OnModelCreating(ModelBuilder builder)
+    {
+        builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
-        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
-        {
-            foreach (var entry in ChangeTracker.Entries<AuditableEntity>())
-            {
-                switch (entry.State)
-                {
-                    case EntityState.Added:
-                        entry.Entity.CreatedBy = _currentUserService.UserId;
-                        entry.Entity.Created = _dateTime.Now;
-                        break;
+        base.OnModelCreating(builder);
+    }
 
-                    case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = _currentUserService.UserId;
-                        entry.Entity.LastModified = _dateTime.Now;
-                        break;
-                }
-            }
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.AddInterceptors(_auditableEntitySaveChangesInterceptor);
+    }
 
-            var result = await base.SaveChangesAsync(cancellationToken);
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        await _mediator.DispatchDomainEvents(this);
 
-            await DispatchEvents();
-
-            return result;
-        }
-
-        protected override void OnModelCreating(ModelBuilder builder)
-        {
-            builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
-
-            base.OnModelCreating(builder);
-        }
-
-        private async Task DispatchEvents()
-        {
-            while (true)
-            {
-                var domainEventEntity = ChangeTracker.Entries<IHasDomainEvent>()
-                    .Select(x => x.Entity.DomainEvents)
-                    .SelectMany(x => x)
-                    .Where(domainEvent => !domainEvent.IsPublished)
-                    .FirstOrDefault();
-                if (domainEventEntity == null) break;
-
-                domainEventEntity.IsPublished = true;
-                await _domainEventService.Publish(domainEventEntity);
-            }
-        }
+        return await base.SaveChangesAsync(cancellationToken);
     }
 }
